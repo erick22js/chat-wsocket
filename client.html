@@ -1,0 +1,172 @@
+<html>
+	<head>
+	</head>
+	<body>
+		<label>Username:</label>
+		<input type="text" id="username" placeholder="username"/><br/>
+		<label>Password:&nbsp</label>
+		<input type="text" id="password" placeholder="password"/><button id="enterbtn" onclick="enter()">Enter</button><br/>
+		<br/><br/>
+		<select id="userlist" disabled></select><br/>
+		<input type="checkbox" id="online" onclick="checked = !checked">Online</input><br/>
+		<textarea id="history" style="width:500px; height:500px" readonly></textarea><br/><br/>
+		<input type="text" id="message" style="width:500px" placeholder="message" disabled/>&nbsp;<button id="sendbtn" onclick="send()" disabled>&nbsp;Send&nbsp;</button><br/>
+		
+		<script src=".hidden/local_ip.js"></script>
+		<script>
+			let webSocket;
+			let chats = {};
+			document.getElementById("message").disabled = true;
+			document.getElementById("sendbtn").disabled = true;
+			document.getElementById("userlist").disabled = true;
+			document.getElementById("online").checked = false;
+			
+			function enter() {
+				let username = document.getElementById("username").value;
+				let password = document.getElementById("password").value;
+				webSocket = new WebSocket("ws://"+LOCAL_IP+":8080");
+				
+				webSocket.onopen = (event) => {
+					webSocket.send(JSON.stringify({
+						"type": "login",
+						"username": username,
+						"password": password
+					}));
+				};
+				webSocket.onmessage = onmessage;
+				webSocket.onerror = error;
+				
+				document.getElementById("username").disabled = true;
+				document.getElementById("enterbtn").disabled = true;
+			}
+			
+			function send() {
+				webSocket.send(JSON.stringify({
+					"type": "message",
+					"to": document.getElementById("userlist").value,
+					"msg": document.getElementById("message").value,
+				}));
+				let date = new Date();
+				addMessage(document.getElementById("userlist").value, date.getHours(), date.getMinutes(), date.getSeconds(), document.getElementById("username").value, document.getElementById("message").value);
+				document.getElementById("message").value = null;
+				reload();
+			}
+			
+			function addMessage(chat, hr, mn, sc, from, msg) {
+				chats[chat].msgs += "\n\n"+hr+":"+mn+":"+sc+" => "+from+"\n"+msg;
+			}
+			
+			function onmessage(ev) {
+				let data = JSON.parse(ev.data);
+				console.log(ev.data);
+				
+				switch (data.type){
+					case 'login': {
+							if (data.error){
+								switch (data.error){
+									case 1: {
+											alert("There is already a username with name '"+document.getElementById("username").value+"' online, try another one.");
+										}
+										break;
+									case 2: {
+											alert("Incorrect password!");
+										}
+										break;
+									case 3: {
+											alert("The username '"+document.getElementById("username").value+"' is invalid, try another one.");
+										}
+										break;
+								}
+								webSocket.close();
+								webSocket = null;
+								document.getElementById("username").disabled = null;
+								document.getElementById("enterbtn").disabled = null;
+							}
+							else {
+								document.getElementById("message").disabled = null;
+								document.getElementById("sendbtn").disabled = null;
+								document.getElementById("userlist").disabled = null;
+							}
+						}
+						break;
+					case 'message': {
+							/*if (!chats[data.from]){
+								chats[data.from] = { "msgs": "", "online": false, };
+							}*/
+							if (document.getElementById("username").value != data.from) addMessage(data.from, data.hr, data.mn, data.sc, data.from, data.msg);
+							reload();
+						}
+						break;
+					case 'alert': {
+							/*if (!chats[data.from]){
+								chats[data.from] = { "msgs": "", "online": false, };
+							}*/
+							if (data.info == 'login') chats[data.from].online = true;
+							if (data.info == 'logoff') chats[data.from].online = false;
+							chats[data.from].msgs += "\n\n"+data.from+" - "+data.info;
+							reload();
+						}
+						break;
+					case 'refresh_users': {
+							let sv = document.getElementById("userlist").value;
+							document.getElementById("userlist").innerHTML = '';
+							for (let i=0; i<data.list.length; i++){
+								if (!chats[data.list[i].username]) {
+									chats[data.list[i].username] = {
+										"msgs": "",
+										"online": false,
+									};
+								}
+								chats[data.list[i].username].online = data.list[i].online;
+								if (data.list[i].username != document.getElementById("username").value) document.getElementById("userlist").innerHTML += '<option value="'+data.list[i].username+'">'+data.list[i].username+'</option>';
+							}
+							document.getElementById("userlist").value = sv;
+							reload();
+						}
+						break;
+					case 'ping': {
+							webSocket.send(JSON.stringify({
+								"type": "pong",
+							}));
+						}
+						break;
+				}
+			}
+			
+			function reload(){
+				if (chats[document.getElementById("userlist").value]){
+					document.getElementById("online").checked = chats[document.getElementById("userlist").value].online;
+					document.getElementById("history").textContent = chats[document.getElementById("userlist").value].msgs;
+				}
+				else {
+					document.getElementById("online").checked = false;
+					document.getElementById("history").textContent = "";
+				}
+			}
+			
+			function refreshUsers(){
+				webSocket.send(JSON.stringify({
+					"type": "refresh_users",
+				}));
+			}
+			
+			function error(){
+				document.write("Socket ERROR!<br/>");
+			}
+			
+			/*
+			webSocket.onclose = () => {
+				document.write("Socket closed!<br/>");
+			}
+			
+			webSocket.onerror = () => {
+				document.write("Socket ERROR!<br/>");
+			}
+			*/
+			document.getElementById("userlist").onchange = function(){
+				reload();
+				webSocket.send(JSON.stringify({"type": "refresh_users"}));
+			}
+		</script>
+	</body>
+</html>
